@@ -17,7 +17,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 
 @bot.tree.command(name="generate_qr", description="Generates a QR code with your user ID")
 async def generate_qr(interaction: discord.Interaction):
-    await interaction.response.defer()  # 処理に時間がかかる可能性があるため、応答を遅延させます
+    await interaction.response.defer()  # 処理に時間がかかる可能性があるため、応答を遅延させる
 
     user_id = interaction.user.id  # ユーザーIDを取得
 
