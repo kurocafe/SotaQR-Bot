@@ -16,7 +16,7 @@ Test_guild_id = int(os.getenv("TEST_GUILD"))
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-@bot.tree.command(name="generate_qr", description="Generates a QR code with your user ID and sends it via DM")
+@bot.tree.command(name="generate_qr", description="QRコードを作るよ！")
 @discord.app_commands.describe(name="Your name to include in the QR code")
 async def generate_qr(interaction: discord.Interaction, name: str):
     await interaction.response.defer(ephemeral=True)  # 処理に時間がかかる可能性があるため、応答を遅延させる
@@ -31,14 +31,14 @@ async def generate_qr(interaction: discord.Interaction, name: str):
                 
                 try:
                     # DMで送信
-                    await interaction.user.send(f"Here's your QR code for user ID {user_id}:", file=file)
-                    await interaction.followup.send("QR code has been sent to your DM.", ephemeral=True)
+                    await interaction.user.send(f"QRコード出来たよ! \nID: {user_id}:", file=file)
+                    await interaction.followup.send("QRコードを直接あなたに送りました!", ephemeral=True)
                 except discord.errors.Forbidden:
                     # DMを送信できない場合（ユーザーがDMを許可していない場合など）
-                    await interaction.followup.send("I couldn't send you a DM. Please check your privacy settings and try again.", ephemeral=True)
+                    await interaction.followup.send("QRコードが送れないです。DMは開放されていますか？", ephemeral=True)
                     # await interaction.response.send_message("I couldn't send you a DM. Please check your privacy settings and try again.", ephemeral=True)
             else:
-                await interaction.followup.send("Failed to generate QR code.", ephemeral=True)
+                await interaction.followup.send("QRコードの作成に失敗しました。", ephemeral=True)
 
 @bot.event
 async def on_ready():
