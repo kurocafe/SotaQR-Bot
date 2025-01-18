@@ -98,7 +98,7 @@ async def send_question(interaction, question_index):
             # 2問目以降は followup を使用
             await interaction.followup.send(message_content, view=view, ephemeral=True)
     else:
-        await interaction.followup.send("アンケートが完了しました。ご協力ありがとうございます！", ephemeral=True)
+        await interaction.followup.send("アンケートが完了しました。\nご協力ありがとうございます！", ephemeral=True)
         await complete_survey(interaction)
 
 
@@ -122,7 +122,7 @@ async def on_interaction(interaction: discord.Interaction):
             )
             
             # 少し待機してから次の質問を送信
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
             await send_question(interaction, question_index + 1)
 
 
@@ -181,10 +181,10 @@ async def complete_survey(interaction: discord.Interaction):
         answer = responses.get(str(i), "未回答")
         response_summary += f"Q{i+1}: {question['question']} - 回答: {answer}\n"
     
-    await interaction.followup.send(response_summary, ephemeral=True)
+    await interaction.followup.send(f"{response_summary}\n", ephemeral=True)
     
     developer = bot.get_user(DEVELOPER_ID)
-    await developer.send(f"{interaction.user.name}さんの\n{response_summary}")
+    await developer.send(f"**{interaction.user.name}さん**の\n{response_summary}")
 
 
 @bot.event
