@@ -33,6 +33,20 @@ def init_db():
     conn.commit()
     conn.close()
 
+@bot.event
+async def on_member_join(member):
+    role = member.guild.get_role(1330385372454064232)  # ロールIDを指定
+    if role:
+        await member.add_roles(role)
+        print(f"{member.name}に{role.name}ロールを付与しました。")
+        
+        developer = bot.get_user(DEVELOPER_ID)
+        await developer.send(f"**{member.name}さん**が参加しました！")
+        
+        
+
+
+
 # QRコード生成コマンド
 @bot.tree.command(name="generate_qr", description="QRコードを作るよ！")
 @discord.app_commands.describe(name="Your name to include in the QR code")
@@ -68,6 +82,7 @@ SURVEY_QUESTIONS = [
     {"question": "好きな季節は？", "options": ["春", "夏", "秋", "冬"]},
     {"question": "好きな動物は？", "options": ["5", "4", "3", "2", "1"]},
     # ここに追加の質問を入れてください（合計10問程度）
+    {"question": "最後にこのシステムについて改善点などを教えてください．", "type": "free_text"},
 ]
 
 class SurveyView(View):
@@ -81,25 +96,74 @@ class SurveyView(View):
             custom_id=f"survey_{question_index}"
         ))
 
-@bot.tree.command(name="survey", description="アンケートに回答します")
+class FreeTextModal(discord.ui.Modal, title="自由記述回答"):
+    def __init__(self, question):
+        super().__init__()
+        self.text_input = discord.ui.TextInput(
+            label=question,
+            style=discord.TextStyle.long,
+            max_length=1000
+        )
+        self.add_item(self.text_input)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await save_free_text_response(interaction.user.id, self.text_input.value)
+        # await interaction.response.send_message("回答を受け付けました。ありがとうございます！", ephemeral=True)
+        await send_question(interaction, len(SURVEY_QUESTIONS))
+
+
+
+
+@bot.tree.command(name="survey", description="アンケートのご協力をお願いします！")
 async def survey(interaction: discord.Interaction):
     await send_question(interaction, 0)
 
 async def send_question(interaction, question_index):
     if question_index < len(SURVEY_QUESTIONS):
         question = SURVEY_QUESTIONS[question_index]
-        message_content = f"質問 {question_index + 1}/{len(SURVEY_QUESTIONS)}:\n**{question['question']}**"
-        view = SurveyView(question_index)
-        
-        if question_index == 0:
-            # 最初の質問の場合は直接応答
-            await interaction.response.send_message(message_content, view=view, ephemeral=True)
+        if question.get("type") == "free_text":
+            class FreeTextButton(discord.ui.View):
+                @discord.ui.button(label="回答する", style=discord.ButtonStyle.primary)
+                async def button_callback(self, button_interaction: discord.Interaction, button: discord.ui.Button):
+                    await button_interaction.response.send_modal(FreeTextModal(question["question"]))
+
+            await interaction.followup.send("最後に自由記述の回答をお願いします。以下のボタンをクリックして回答してください。", view=FreeTextButton(), ephemeral=True)
         else:
-            # 2問目以降は followup を使用
-            await interaction.followup.send(message_content, view=view, ephemeral=True)
+            message_content = f"質問 {question_index + 1}/{len(SURVEY_QUESTIONS)}:\n**{question['question']}**"
+            view = SurveyView(question_index)
+            
+            if question_index == 0:
+                await interaction.response.send_message(message_content, view=view, ephemeral=True)
+            else:
+                await interaction.followup.send(message_content, view=view, ephemeral=True)
     else:
         await interaction.followup.send("アンケートが完了しました。\nご協力ありがとうございます！", ephemeral=True)
         await complete_survey(interaction)
+
+
+
+
+async def save_free_text_response(user_id, response):
+    conn = sqlite3.connect('survey_responses.db')
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT responses FROM survey_responses WHERE user_id = ?", (str(user_id),))
+    result = cursor.fetchone()
+    
+    if result:
+        responses = json.loads(result[0])
+    else:
+        responses = {}
+    
+    responses["free_text"] = response
+    
+    json_data = json.dumps(responses)
+    cursor.execute("INSERT OR REPLACE INTO survey_responses (user_id, user_name, responses) VALUES (?, ?, ?)",
+                   (str(user_id), bot.get_user(user_id).name, json_data))
+    
+    conn.commit()
+    conn.close()
+
 
 
 
@@ -111,19 +175,17 @@ async def on_interaction(interaction: discord.Interaction):
             question_index = int(custom_id.split("_")[1])
             selected_option = interaction.data["values"][0]
             
-            # ユーザーの回答を保存
             user_id = str(interaction.user.id)
             save_response(user_id, question_index, selected_option)
             
-            # 回答確認のメッセージを表示
             await interaction.response.edit_message(
                 content=f"「{SURVEY_QUESTIONS[question_index]['question']}」に対して「{selected_option}」と回答しました。",
                 view=None
             )
             
-            # 少し待機してから次の質問を送信
             await asyncio.sleep(0.5)
             await send_question(interaction, question_index + 1)
+
 
 
 def save_response(user_id, question_index, response):
@@ -178,13 +240,17 @@ async def complete_survey(interaction: discord.Interaction):
     
     response_summary = "アンケート回答のまとめ:\n"
     for i, question in enumerate(SURVEY_QUESTIONS):
-        answer = responses.get(str(i), "未回答")
+        if question.get("type") == "free_text":
+            answer = responses.get("free_text", "未回答")
+        else:
+            answer = responses.get(str(i), "未回答")
         response_summary += f"Q{i+1}: {question['question']} - 回答: {answer}\n"
     
     await interaction.followup.send(f"{response_summary}\n", ephemeral=True)
     
     developer = bot.get_user(DEVELOPER_ID)
     await developer.send(f"**{interaction.user.name}さん**の\n{response_summary}")
+
 
 
 @bot.event
@@ -196,7 +262,9 @@ async def on_ready():
         init_db()
         print("Database initialized")
         print("Bot is ready!")
-        await bot.change_presence(activity=discord.Game(name="開発中"))
+        # await bot.change_presence(activity=discord.Game(name="アンケートしてね！"))
+        await bot.change_presence(activity=discord.CustomActivity(name="実験よろしくね！"))
+        # await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="アンケートしてね！"))
     except Exception as e:
         print(e)
 
