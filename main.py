@@ -134,10 +134,19 @@ class FreeTextButton(discord.ui.View):
         await button_interaction.response.send_modal(
             FreeTextModal(self.question_text, self.index)
         )
-        # ボタンを更新（ラベル変更＋無効化）
-        button.label = "回答済み"
-        button.disabled = True
+
+        # モーダルが表示された後、ボタンのラベルと無効化を更新する
+        await self.update_button(button_interaction)
+
+    async def update_button(self, button_interaction: discord.Interaction):
+        # ボタンのラベルと無効化を更新する
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.label = "回答済み"
+                item.disabled = True
+        # ボタン状態を更新した後、元のメッセージを編集してビューを更新
         await button_interaction.edit_original_response(view=self)
+
 
 
 
@@ -162,6 +171,7 @@ async def survey(interaction: discord.Interaction):
         await interaction.response.send_message("すでにアンケートに回答されています．もう一度回答しますか？", view=ConfirmView(), ephemeral=True)
     else:
         await send_question(interaction, 0)
+
 
 async def send_question(interaction, question_index):
     # 質問を送信するロジック
