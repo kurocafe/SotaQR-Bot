@@ -81,8 +81,7 @@ SURVEY_QUESTIONS = [
     {"question": "論文の内容は興味がありましたか？", "options": ["5", "4", "3", "2", "1"]},
     {"question": "もし引継ぎを行うとなった場合，このシステムでどれくらい担えると感じましたか？", "options": ["5", "4", "3", "2", "1"]},
     {"question": "Discordとの連携について，どれくらい便利だと感じましたか？" , "options": ["5", "4", "3", "2", "1"]},
-    # {"question": "好きな季節は？", "options": ["春", "夏", "秋", "冬"]},
-    # {"question": "好きな動物は？", "options": ["5", "4", "3", "2", "1"]},
+
     # ここに追加の質問を入れてください（合計10問程度）
     {"question": "実際にあなたが興味を持っている分野を教えてください．（「わからない」でもOK）", "type": "free_text"},
     {"question": "最後にこのシステムについて改善点などを教えてください．（いっぱい書いてくれたら喜びます）", "type": "free_text"},
@@ -122,6 +121,25 @@ class FreeTextModal(discord.ui.Modal, title="自由記述回答"):
         await send_question(interaction, self.question_index + 1)
 
 
+# ボタン用のViewを定義
+class FreeTextButton(discord.ui.View):
+    def __init__(self, question_text, index):
+        super().__init__()
+        self.question_text = question_text
+        self.index = index
+
+    @discord.ui.button(label="回答する", style=discord.ButtonStyle.primary)
+    async def button_callback(self, button_interaction: discord.Interaction, button: discord.ui.Button):
+        # モーダルを表示
+        await button_interaction.response.send_modal(
+            FreeTextModal(self.question_text, self.index)
+        )
+        # ボタンを更新（ラベル変更＋無効化）
+        button.label = "回答済み"
+        button.disabled = True
+        await button_interaction.edit_original_response(view=self)
+
+
 
 
 @bot.tree.command(name="survey", description="アンケートのご協力をお願いします！")
@@ -148,42 +166,51 @@ async def survey(interaction: discord.Interaction):
 async def send_question(interaction, question_index):
     # 質問を送信するロジック
     if question_index >= len(SURVEY_QUESTIONS):
-        await complete_survey(interaction)
+        await complete_survey(interaction)  # アンケートが終了したら complete_survey を呼び出す
     else:
-        # 次の質問を送信するロジック
-        if question_index < len(SURVEY_QUESTIONS):
-            question = SURVEY_QUESTIONS[question_index]
-            if question.get("type") == "free_text":
-                class FreeTextButton(discord.ui.View):
-                    @discord.ui.button(label="回答する", style=discord.ButtonStyle.primary)
-                    async def button_callback(self, button_interaction: discord.Interaction, button: discord.ui.Button):
-                        await button_interaction.response.send_modal(FreeTextModal(question["question"], question_index))
+        question = SURVEY_QUESTIONS[question_index]
+        if question.get("type") == "free_text":
+            # 自由記述の質問の場合
+            button_view = FreeTextButton(question["question"], question_index)
 
-                # インタラクションが有効かどうかをチェック
-                try:
-                    if interaction.response.is_done():
-                        await interaction.followup.send(f"質問 {question_index + 1}/{len(SURVEY_QUESTIONS)}:\n自由記述の回答をお願いします。以下のボタンをクリックして回答してください。", view=FreeTextButton(), ephemeral=True)
-                    else:
-                        print("else")
-                        await interaction.response.send_message(f"質問 {question_index + 1}/{len(SURVEY_QUESTIONS)}:\n自由記述の回答をお願いします。以下のボタンをクリックして回答してください。", view=FreeTextButton(), ephemeral=True)
-                except:
-                    # インタラクションが無効な場合、直接メッセージを送信
-                    channel = interaction.channel
-                    await channel.send("自由記述の回答をお願いします。", view=FreeTextButton(), delete_after=180)
-            else:
-                message_content = f"質問 {question_index + 1}/{len(SURVEY_QUESTIONS)}:\n**{question['question']}**"
-                view = SurveyView(question_index)
-                
-                try:
-                    if interaction.response.is_done():
-                        await interaction.followup.send(message_content, view=view, ephemeral=True)
-                    else:
-                        await interaction.response.send_message(message_content, view=view, ephemeral=True)
-                except:
-                    channel = interaction.channel
-                    await channel.send(message_content, view=view, delete_after=180)
+            try:
+                # インタラクションがまだレスポンスしていない場合
+                if interaction.response.is_done():
+                    await interaction.followup.send(
+                        f"質問 {question_index + 1}/{len(SURVEY_QUESTIONS)}:\n自由記述の回答をお願いします。以下のボタンをクリックして回答してください。",
+                        view=button_view,
+                        ephemeral=True
+                    )
+                else:
+                    await interaction.response.send_message(
+                        f"質問 {question_index + 1}/{len(SURVEY_QUESTIONS)}:\n自由記述の回答をお願いします。以下のボタンをクリックして回答してください。",
+                        view=button_view,
+                        ephemeral=True
+                    )
+            except Exception as e:
+                # エラーが発生した場合、フォールバックとしてチャンネルにメッセージを送信
+                print(f"Error sending message: {e}")
+                channel = interaction.channel
+                await channel.send(
+                    f"質問 {question_index + 1}/{len(SURVEY_QUESTIONS)}:\n自由記述の回答をお願いします。",
+                    view=button_view,
+                    delete_after=180
+                )
         else:
-            await complete_survey(interaction)
+            # 自由記述以外の質問の場合
+            message_content = f"質問 {question_index + 1}/{len(SURVEY_QUESTIONS)}:\n**{question['question']}**"
+            view = SurveyView(question_index)
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(message_content, view=view, ephemeral=True)
+                else:
+                    await interaction.response.send_message(message_content, view=view, ephemeral=True)
+            except Exception as e:
+                # エラーが発生した場合、フォールバックとしてチャンネルにメッセージを送信
+                print(f"Error sending message: {e}")
+                channel = interaction.channel
+                await channel.send(message_content, view=view, delete_after=180)
+
 
 
 
