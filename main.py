@@ -79,8 +79,8 @@ user_responses = {}
 SURVEY_QUESTIONS = [
     {"question": "あなたの好きな食べ物は？", "options": ["ピザ", "ハンバーガー", "寿司", "ラーメン", "カレー"]},
     {"question": "最も好きなプログラミング言語は？", "options": ["Python", "JavaScript", "Java", "C++", "Ruby"]},
-    {"question": "好きな季節は？", "options": ["春", "夏", "秋", "冬"]},
-    {"question": "好きな動物は？", "options": ["5", "4", "3", "2", "1"]},
+    # {"question": "好きな季節は？", "options": ["春", "夏", "秋", "冬"]},
+    # {"question": "好きな動物は？", "options": ["5", "4", "3", "2", "1"]},
     # ここに追加の質問を入れてください（合計10問程度）
     {"question": "最後にこのシステムについて改善点などを教えてください．", "type": "free_text"},
 ]
@@ -107,16 +107,40 @@ class FreeTextModal(discord.ui.Modal, title="自由記述回答"):
         self.add_item(self.text_input)
 
     async def on_submit(self, interaction: discord.Interaction):
-        await save_free_text_response(interaction.user.id, self.text_input.value)
-        # await interaction.response.send_message("回答を受け付けました。ありがとうございます！", ephemeral=True)
-        await send_question(interaction, len(SURVEY_QUESTIONS))
+        user_id = interaction.user.id
+        response = self.text_input.value
+        print(f"User {user_id} submitted free text response: {response}")  # デバッグ出力
+        await save_free_text_response(user_id, response)
+
+        # ユーザーにメッセージを送信して処理を完了させる
+        await interaction.response.send_message("回答を受け付けました。ありがとうございます！", ephemeral=True)
+        
+        # アンケート完了処理を呼び出す
+        await complete_survey(interaction)
 
 
 
 
 @bot.tree.command(name="survey", description="アンケートのご協力をお願いします！")
 async def survey(interaction: discord.Interaction):
-    await send_question(interaction, 0)
+    user_id = str(interaction.user.id)
+    responses = get_user_responses(user_id)
+    
+    if responses:
+        class ConfirmView(discord.ui.View):
+            @discord.ui.button(label="はい", style=discord.ButtonStyle.primary)
+            async def yes_button(self, button_interaction: discord.Interaction, button: discord.ui.Button):
+                await button_interaction.response.defer()
+                await button_interaction.edit_original_response(content="アンケートを始めます．", view=None)
+                await send_question(button_interaction, 0)
+
+            @discord.ui.button(label="いいえ", style=discord.ButtonStyle.secondary)
+            async def no_button(self, button_interaction: discord.Interaction, button: discord.ui.Button):
+                await button_interaction.response.edit_message(content="アンケートをキャンセルしました．", view=None)
+
+        await interaction.response.send_message("すでにアンケートに回答されています．もう一度回答しますか？", view=ConfirmView(), ephemeral=True)
+    else:
+        await send_question(interaction, 0)
 
 async def send_question(interaction, question_index):
     if question_index < len(SURVEY_QUESTIONS):
@@ -133,14 +157,14 @@ async def send_question(interaction, question_index):
             view = SurveyView(question_index)
             
             if question_index == 0:
-                await interaction.response.send_message(message_content, view=view, ephemeral=True)
+                if interaction.response.is_done():
+                    await interaction.followup.send(message_content, view=view, ephemeral=True)
+                else:
+                    await interaction.response.send_message(message_content, view=view, ephemeral=True)
             else:
                 await interaction.followup.send(message_content, view=view, ephemeral=True)
     else:
-        await interaction.followup.send("アンケートが完了しました。\nご協力ありがとうございます！", ephemeral=True)
         await complete_survey(interaction)
-
-
 
 
 async def save_free_text_response(user_id, response):
@@ -159,7 +183,7 @@ async def save_free_text_response(user_id, response):
     
     json_data = json.dumps(responses)
     cursor.execute("INSERT OR REPLACE INTO survey_responses (user_id, user_name, responses) VALUES (?, ?, ?)",
-                   (str(user_id), bot.get_user(user_id).name, json_data))
+                   (str(user_id), bot.get_user(int(user_id)).name, json_data))
     
     conn.commit()
     conn.close()
@@ -193,7 +217,7 @@ def save_response(user_id, question_index, response):
     cursor = conn.cursor()
     
     # ユーザーの既存の回答を取得
-    cursor.execute("SELECT responses FROM survey_responses WHERE user_id = ?", (user_id,))
+    cursor.execute("SELECT responses FROM survey_responses WHERE user_id = ?", (str(user_id),))
     result = cursor.fetchone()
     
     if result:
@@ -203,8 +227,8 @@ def save_response(user_id, question_index, response):
         # 新規ユーザーの場合、新しい辞書を作成
         responses = {}
     
-    # 新しい回答を追加
-    responses[str(question_index)] = response
+    # 新しい回答を追加 (文字列に変換)
+    responses[str(question_index)] = str(response)
     
     # user_nameを取得
     user_name = bot.get_user(int(user_id)).name
@@ -212,7 +236,7 @@ def save_response(user_id, question_index, response):
     # 更新されたJSONをデータベースに保存
     json_data = json.dumps(responses)
     cursor.execute("INSERT OR REPLACE INTO survey_responses (user_id, user_name, responses) VALUES (?, ?, ?)",
-                   (user_id, user_name, json_data))
+                   (str(user_id), user_name, json_data))
     
     conn.commit()
     conn.close()
@@ -232,7 +256,6 @@ def get_user_responses(user_id):
     else:
         return {}
 
-
 # アンケート完了時の処理例
 async def complete_survey(interaction: discord.Interaction):
     user_id = str(interaction.user.id)
@@ -243,13 +266,33 @@ async def complete_survey(interaction: discord.Interaction):
         if question.get("type") == "free_text":
             answer = responses.get("free_text", "未回答")
         else:
+            # 質問インデックスを文字列に変換して取得
             answer = responses.get(str(i), "未回答")
         response_summary += f"Q{i+1}: {question['question']} - 回答: {answer}\n"
     
-    await interaction.followup.send(f"{response_summary}\n", ephemeral=True)
+    try:
+        await interaction.followup.send(f"{response_summary}\nアンケートが完了しました。\nご協力ありがとうございます！", ephemeral=True)
+    except discord.errors.NotFound:
+        # インタラクションが見つからない場合、DMで送信を試みる
+        try:
+            await interaction.user.send(f"{response_summary}\nアンケートが完了しました。\nご協力ありがとうございます！")
+        except discord.errors.Forbidden:
+            print(f"ユーザー {interaction.user.name} にDMを送信できませんでした。")
+    
+    role_id = 1330626245188386886  # 付与したいロールのIDを指定してください
+    role = interaction.guild.get_role(role_id)
+    if role:
+        try:
+            await interaction.user.add_roles(role)
+            await interaction.followup.send("アンケート回答ありがとうございます！特別なロールを付与しました。", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.followup.send("ロールの付与に失敗しました。BOTの権限を確認してください。", ephemeral=True)
+    else:
+        await interaction.followup.send("指定されたロールが見つかりませんでした。", ephemeral=True)
     
     developer = bot.get_user(DEVELOPER_ID)
     await developer.send(f"**{interaction.user.name}さん**の\n{response_summary}")
+
 
 
 
