@@ -161,7 +161,7 @@ async def survey(interaction: discord.Interaction):
             @discord.ui.button(label="はい", style=discord.ButtonStyle.primary)
             async def yes_button(self, button_interaction: discord.Interaction, button: discord.ui.Button):
                 await button_interaction.response.defer()
-                await button_interaction.edit_original_response(content="アンケートを始めます．", view=None)
+                await button_interaction.edit_original_response(content="アンケートを始めます．\n\n1〜5までの評価をつけてください。5が一番そう思うという感じで、1はあまりそう思わないって感じです。", view=None)
                 await send_question(button_interaction, 0)
 
             @discord.ui.button(label="いいえ", style=discord.ButtonStyle.secondary)
@@ -170,6 +170,7 @@ async def survey(interaction: discord.Interaction):
 
         await interaction.response.send_message("すでにアンケートに回答されています．もう一度回答しますか？", view=ConfirmView(), ephemeral=True)
     else:
+        await interaction.response.send_message("アンケートを始めます。\n\n1〜5までの評価をつけてください。5が一番そう思うという感じで、1はあまりそう思わないって感じです。", ephemeral=True)
         await send_question(interaction, 0)
 
 
